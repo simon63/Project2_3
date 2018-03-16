@@ -1,0 +1,175 @@
+---
+title: "DATA 607 - Project 2.3"
+author: "Simon63"
+date: "March 12, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r lib, warning=FALSE, message=FALSE}
+# install.packages("tidyverse")
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+```
+
+My Post: "World Tourism Data"  
+http://data.un.org/DocumentData.aspx?id=375  
+The data looks pretty "untidy" and one can transform it and perform several analysis, such as comparing Inbound vs. Outbound tourism numbers,  detecting trends through the years, comparing numbers between countries, and etc.
+
+Downloaded XLS file, "Arrivals of non resident tourists_visitors, depart.xls" and saved it as "World Tourism Data.xlsx"
+
+Here's how the data looks initially:
+image: ![](C:/Users/simus/Documents/R/Project 2/World Tourism Data.PNG)
+
+Read XLSX File, skiping the first 5 rows in order to get to proper headers
+```{r load_data}
+# Get path [in platform independent way using file.path() function]
+path <- file.path("~", "R", "Project 2", "World Tourism Data.xlsx")
+df <-  read_xlsx(path, skip = 5) %>% tbl_df()
+df
+```
+
+I decided to look at the data for North America:
+rows [419:429] for CANADA and rows [2340:2350] for USA
+```{r}
+dfCAN <- df[419:429, ]
+dfUSA <- df[2340:2350, ]
+```
+
+Data displayed for CANADA
+```{r}
+  head(dfCAN, n = (429-419))
+```
+
+
+I'm looking to **filter** out all the line items which are identified by the following strings under the COUNTRY column:  
+1. Travel - US$ Mn  
+2. Passenger transport - US$ Mn  
+3. Inbound tourism  
+4. Outbound tourism  
+```{r}
+dfCAN_1 <- filter(dfCAN, !COUNTRY %in% c("Travel - US$ Mn", "Passenger transport - US$ Mn", "Inbound tourism", "Outbound tourism"))
+dfCAN_1
+```
+
+Then I want to **gather** all the numerical observations for each year under one column, "YEAR"
+```{r}
+dfCAN_2 <- gather(dfCAN_1, "YEAR", "n", 5:(5+2014-1995))
+dfCAN_2
+```
+
+Do some cleanup by removing unwanted columns
+```{r}
+dfCAN_3 <- dfCAN_2[,c(-1, -3:-5)]
+dfCAN_3
+```
+
+Next I want to use **spread** to turn rows into columns
+```{r}
+dfCAN_4 <- spread(dfCAN_3, COUNTRY, n)
+dfCAN_4
+```
+
+CANADA column gets renamed to COUNTRY
+```{r}
+names(dfCAN_4)[which(colnames(dfUSA) == "CANADA")] <- "COUNTRY"
+dfCAN_4
+```
+
+...and the COUNTRY column gets assinged "CANADA" value
+```{r}
+dfCAN_4$COUNTRY <- "CANADA"
+dfCAN_4
+```
+
+Creating a final data frame for Canada data to be used in analysis
+```{r}
+dfCanada <- data.frame(
+  Year = dfCAN_4$YEAR,
+  Country = dfCAN_4$COUNTRY,
+  Arrivals = dfCAN_4$`Arrivals - Thousands` %>% type.convert(na.strings = ".."),
+  Departures = dfCAN_4$`Departures - Thousands` %>% type.convert(na.strings = ".."),
+  Expenditure_In = dfCAN_4$`Tourism expenditure in the country - US$ Mn` %>% type.convert(na.strings = ".."),
+  Expenditure_Out = dfCAN_4$`Tourism expenditure in other countries - US$ Mn` %>% type.convert(na.strings = ".."))
+dfCanada
+```
+
+Perform similar operations for USA data
+```{r}
+dfUSA %<>%  filter(!COUNTRY %in% c("Travel - US$ Mn", "Passenger transport - US$ Mn", "Inbound tourism", "Outbound tourism"))        %>% gather("YEAR", "n", 5:(5+2014-1995))
+dfUSA <- dfUSA[,c(-1, -3:-5)]
+dfUSA <- spread(dfUSA, COUNTRY, n)
+names(dfUSA)[which(colnames(dfUSA) == "UNITED STATES OF AMERICA")] <- "COUNTRY"
+dfUSA$COUNTRY <- "USA"
+dfUSA <- data.frame(
+  Year = dfUSA$YEAR,
+  Country = dfUSA$COUNTRY,
+  Arrivals = dfUSA$`Arrivals - Thousands` %>% type.convert(na.strings = ".."),
+  Departures = dfUSA$`Departures - Thousands` %>% type.convert(na.strings = ".."),
+  Expenditure_In = dfUSA$`Tourism expenditure in the country - US$ Mn` %>% type.convert(na.strings = ".."),
+  Expenditure_Out = dfUSA$`Tourism expenditure in other countries - US$ Mn` %>% type.convert(na.strings = ".."))
+dfUSA
+```
+
+Comparing Growth of Arrivals over the years between USA and Canada  
+*NOTE:* Using Window function **cumsum** and **summarise** function to normalize the Arrival numbers for proper [**I hope**] growth indication.
+```{r, warning=FALSE}
+ggplot(
+  bind_rows(
+     mutate(dfCanada, A_Growth = cumsum(Arrivals /  summarise(dfCanada, first(Arrivals))[,1] - 1)),
+     mutate(dfUSA, A_Growth = cumsum(Arrivals /  summarise(dfUSA, first(Arrivals))[,1] - 1))
+  ),
+  mapping = aes(x = Year, y = A_Growth, color = Country, shape = Country)
+) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90))
+#geom_smooth()
+#geom_bar()
+```
+
+Comparing Growth of Departures over the years between USA and Canada
+```{r, warning=FALSE}
+ggplot(
+  bind_rows(
+     mutate(dfCanada, A_Growth = cumsum(Departures /  summarise(dfCanada, first(Departures))[,1] - 1)),
+     mutate(dfUSA, A_Growth = cumsum(Departures /  summarise(dfUSA, first(Departures))[,1] - 1))
+  ),
+  mapping = aes(x = Year, y = A_Growth, color = Country, shape = Country)
+) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+
+Comparing Growth of Departures in Canada vs. Growth of Arrivals in USA and finding a correlation
+```{r, warning=FALSE}
+ggplot(
+  bind_rows(
+     mutate(dfCanada, A_Growth = cumsum(Departures /  summarise(dfCanada, first(Departures))[,1] - 1)),
+     mutate(dfUSA, A_Growth = cumsum(Arrivals /  summarise(dfUSA, first(Arrivals))[,1] - 1))
+  ),
+  mapping = aes(x = Year, y = A_Growth, color = Country, shape = Country)
+) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+**Conclusion**  
+Based on this graph it appears that through the years there is strong indication that people traveling from Canada end up arriving to USA.
+
+```{r, warning=FALSE, echo=FALSE}
+#ggplot(
+#  data = dfUSA,
+#  mapping = aes(x = Year)
+#) +
+#  geom_point(mapping = aes(y = Arrivals), color="blue") +
+#  geom_point(mapping = aes(y = Departures), color="red") +
+#  theme(axis.text.x = element_text(angle = 90))
+```
+
